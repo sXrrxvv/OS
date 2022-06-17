@@ -70,6 +70,8 @@ void receiver(const std::string& fileName){
             }
             else
                 validOption = true;
+            if (option == stop)
+                break;
         }
         WaitForSingleObject(readMessageSemHandler, INFINITE);
         WaitForSingleObject(sharedFileMutexHandler, INFINITE);
