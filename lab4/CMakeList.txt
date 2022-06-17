@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(Lab4)
+
+set(CMAKE_CXX_STANDARD 98)
+
+add_executable(Receiver receiver.cpp message.h definitions.h )
+add_executable(Sender sender.cpp message.h  def
