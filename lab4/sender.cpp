@@ -36,13 +36,15 @@ void sender(std::string& binaryFileName)
         bool validOption = false;
         while(!validOption) {
             std::cout << "Options" << '\n' << "type 3 for writing message" << '\n'
-                      << "type 2 for exiting receiver" << '\n';
+                      << "type 2 for exiting sender" << '\n';
             std::cin >> option;
             if (option != writeMessage && option != stop) {
                 std::cout << "Unrecognised command, try again" << '\n';
             }
             else
                 validOption = true;
+            if(option == stop)
+                break;
         }
         WaitForSingleObject(maxAmountMsgSem, INFINITE);
         message messageToSend;
