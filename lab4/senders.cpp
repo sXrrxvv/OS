@@ -1,5 +1,6 @@
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include "windows.h"
 #include "definitions.h"
 #include "message.h"
@@ -37,7 +38,7 @@ void sender(std::string& binaryFileName)
             std::cout << "Options" << '\n' << "type 3 for writing message" << '\n'
                       << "type 2 for exiting receiver" << '\n';
             std::cin >> option;
-            if (option  != writeMessage && option != stop) {
+            if (option != writeMessage && option != stop) {
                 std::cout << "Unrecognised command, try again" << '\n';
             }
             else
@@ -48,7 +49,13 @@ void sender(std::string& binaryFileName)
         std::cout << "Enter message to send : " << '\n';
         std::cin >> messageToSend;
         WaitForSingleObject(sharedFileMutexHandler, INFINITE);
-        file.open(binaryFileName.c_str(), std::ios::binary | std::ios::out);
+        try {
+            file.open(binaryFileName.c_str(), std::ios::binary | std::ios::out);
+        }
+        catch (std::ios_base::failure&){
+            std::cerr << "cant open file\n";
+            return;
+        }
         file << messageToSend;
         file.close();
         ReleaseMutex(sharedFileMutexHandler);
