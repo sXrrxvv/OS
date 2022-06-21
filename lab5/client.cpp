@@ -36,11 +36,14 @@ bool connect(){
                     0,
                     NULL);
 
-            if (pipeHandle != INVALID_HANDLE_VALUE)
+            if (pipeHandle != INVALID_HANDLE_VALUE) {
+                std::cout << "ivalid handle value";
                 break;
+            }
 
             if (GetLastError() != ERROR_PIPE_BUSY)
             {
+                std::cout << "pipe busy";
                 return false;
             }
 
@@ -153,5 +156,6 @@ int main(int argc, char *argv[])
     WaitForSingleObject(startAllEventHandle, INFINITE);
     bool connectOK = connect();
     processingFunc();
+    std::cout << "END";
     return 0;
 }

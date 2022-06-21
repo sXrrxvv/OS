@@ -9,6 +9,12 @@ enum optionType{
     stop
 };
 
+enum EntryState {
+    IS_FREE,
+    IS_BEING_READ,
+    IS_BEING_MODIFIED
+};
+
 const int msgMaxCapacity = 20;
 const std::string clientExeName = "client.exe";
 const std::string pipeName = "\\\\.\\pipe\\pipeName";
