@@ -1,6 +1,8 @@
+#include "definitions.h"
+
 class message{
 private:
-    char msg[20];
+    char msg[msgMaxCapacity];
 
 public:
     message() : msg() {;}
