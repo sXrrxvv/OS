@@ -1,7 +1,15 @@
 #include "marker.h"
+#include "markerParams.h"
+
+CRITICAL_SECTION markersVectorAccessCritSection;
+std::vector<HANDLE> markedEventsHandlers;
+std::vector<HANDLE> closeThreadEventsHandlers;
+std::vector<HANDLE> removedMarkedEventsHandlers;
+std::vector<HANDLE> threadsHandles;
+HANDLE continueEventHandler;
 
 std::vector<HANDLE> startThreads(int count){
-    std::vector<HANDLE> threadsHandles(count);
+    threadsHandles = std::vector<HANDLE>(count);
     for (int i = 0; i < count; i++){
         HANDLE hThread;
         DWORD IDThread;
@@ -9,7 +17,7 @@ std::vector<HANDLE> startThreads(int count){
                 NULL,
                 0,
                 marker,
-                (void*)new markerParams(i + 1),
+                static_cast<void*> (new markerParams(i + 1)),
                 0,
                 &IDThread);
         if(hThread != NULL){
@@ -23,18 +31,55 @@ std::vector<HANDLE> startThreads(int count){
     return threadsHandles;
 }
 
-HANDLE* CreateEvents(int count, bool manualReset, bool initialState){
-    HANDLE* events = new HANDLE[count];
+std::vector<HANDLE> CreateEvents(int count ,bool manualReset, bool initialState){
+    std::vector<HANDLE> events = new std::vector<HANDLE>(count);
     for (int i = 0; i < count; i++){
-        events[i] = CreateEvent(NULL, manualReset, initialState, NULL);
+        events[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
+        if(NULL == events[i]){
+            throw ;
+        }
     }
     return events;
 }
 
-void print(const std::vector<unsigned int>& v){
-    for (int i = 0; i < v.size(); i++)
-        std::cout << v[i] << " ";
-    std::cout << '\n';
+void initializeHandles(uInt markerCount){
+    InitializeCriticalSection(&markersVectorAccessCritSection);
+    if(NULL == markersVectorAccessCritSection){
+        std::cerr << "ERROR: can't create crit section\n";
+        DeleteCriticalSection(markersVectorAccessCritSection);
+        throw ;
+    }
+    try {
+        markedEventsHandlers = CreateEvents(markerCount, FALSE, FALSE);
+    }
+    catch(...){
+        std::cerr << "ERROR: can't create marked events handlers\n";
+        throw;
+    }
+    continueEventHandler = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if(NULL == continueEventHandler){
+        std::cerr << "ERROR: can't create continue event handle\n";
+        CloseHandle(continueEventHandler);
+        throw ;
+    }
+    try {
+        closeThreadEventsHandlers = CreateEvents(markerCount, TRUE, FALSE);
+    }
+    catch(...) {
+        std::cerr << "ERROR: can't create close events handlers\n";
+        throw;
+    }
+
+}
+
+void closeAll(uInt markersCount){
+    DeleteCriticalSection(markersVectorAccessCritSection);
+    CloseHandle(continueEventHandler);
+    for(int i = 0; i < markersCount; ++i){
+        CloseHandle(closeThreadEventsHandlers[i]);
+        CloseHandle(markedEventsHandlers);
+        CloseHandle(removedMarkedEventsHandlers[i]);
+    }
 }
 
 void SetRemovedEvents(const std::vector<HANDLE>& removedEvents){
@@ -43,41 +88,15 @@ void SetRemovedEvents(const std::vector<HANDLE>& removedEvents){
     }
 }
 
-int main() {
-
-    InitializeCriticalSection(&markersVectorAccessCritSection);
-
-    std::cout << "Enter array size: ";
-    size_t arrSize;
-    std::cin >> arrSize;
-    try {
-        sharedVector = std::vector<unsigned int>(arrSize, 0);https://github.com/sXrrxvv/OS
-    }
-    catch (std::bad_alloc&) {
-        std::cout << "Cant allocate too much memory";
-        return 0;
-    }
-    catch (std::length_error&){
-        std::cout << "size must be positive";
-        return 0;
-    }
-    std::cout << "Enter markers count: ";
-    unsigned int markerCount;
-    std::cin >> markerCount;
-    markedEventsHandlers = CreateEvents(markerCount, FALSE, FALSE);
-    continueEventHandler = CreateEvent(NULL, TRUE, FALSE, NULL);
-    closeThreadEventsHandlers = CreateEvents(markerCount, TRUE, FALSE);
-    std::vector<HANDLE> threadsHandles = startThreads(markerCount);
-
-    std::vector<HANDLE> removedMarkedEventsHandlers;
-
-    unsigned int activeMarkers = markerCount;
+void manageMarkers(uInt markerCount){
+    threadsHandles = startThreads(markerCount);
+    uInt activeMarkers = markerCount;
     while (activeMarkers != 0){
         SetRemovedEvents(removedMarkedEventsHandlers);
         WaitForMultipleObjects(markerCount, markedEventsHandlers, TRUE, INFINITE);
-        print(sharedVector);
+        markerParams::printVector();
         std::cout << "Enter # of marker to be closed: \n";
-        unsigned int num;
+        uInt num;
         std::cin >> num;
         if(num > markerCount){
             std::cout << "wrong index\n";
@@ -88,20 +107,36 @@ int main() {
         activeMarkers--;
         PulseEvent(continueEventHandler);
     }
-    std::cout << "result array : \n";
-    print(sharedVector);
-    std::cout << "\n";
+}
 
-    removedMarkedEventsHandlers.clear();
-    for(int i = 0; i < markerCount; ++i){
-        CloseHandle(closeThreadEventsHandlers[i]);
-        CloseHandle(markedEventsHandlers[i]);
-        CloseHandle(removedMarkedEventsHandlers[i]);
-        CloseHandle(threadsHandles[i]);
+int main() {
+    try{
+        markerParams::initializeStartVector();
     }
-    CloseHandle(continueEventHandler);
-    DeleteCriticalSection(&markersVectorAccessCritSection);
-    sharedVector.clear();
-    std::cout <<"Done cleaning";
+    catch (std::bad_alloc&){
+        std::cerr << "ERROR: can't allocate too much memory";
+        return -1;
+    }
+    catch(std::length_error&){
+        std::cerr << "ERROR: size must be positive";
+        return -1;
+    }
+    std::cout << "Enter markers count: ";
+    uInt markerCount;
+    std::cin >> markerCount;
+    try {
+        initializeHandles(markerCount);
+    }
+    catch(...){
+        std::cerr << "ERROR: initialization error";
+        closeAll(markerCount);
+        return -1;
+    }
+    manageMarkers(markerCount);
+    std::cout << "result array : \n";
+    markerParams::printVector();
+    std::cout << "\n";
+    closeAll(markerCount);
+    return 0;
 
 }
