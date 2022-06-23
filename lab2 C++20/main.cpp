@@ -3,27 +3,35 @@
 #include <chrono>
 #include <vector>
 #include <functional>
+#include <algorithm>
+#include <cfloat>
+
+static const double dZero = 0.0;
+static const int sleepValueAverage = 7;
+static const int sleepValueMinMax = 12;
+
+void sleepFor(int milliseconds){
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
 
 double findAverage(const std::vector<double>& v){
-    double average = 0;
-    for(auto& i : v) {
-        average += (1.0)*i / v.size();
-        std::this_thread::sleep_for(std::chrono::milliseconds(12));
-    }
+    double average = dZero;
+    std::for_each(v.begin(), v.end(), [&](double a) {return average += a/v.size();});
+    sleepFor(sleepValueAverage);
     return average;
 }
 
 std::pair<int,int> findMinMax(const std::vector<double>& v){
-    int max = INT_MIN;
-    int min = INT_MAX;
-    for(auto& i : v){
-        if(max < i)
-            max = i;
-        std::this_thread::sleep_for(std::chrono::milliseconds(7));
-        if(min > i)
-            min = i;
-        std::this_thread::sleep_for(std::chrono::milliseconds(7));
-    }
+    auto max = DBL_MIN;
+    auto min = DBL_MAX;
+    std::for_each(v.begin(), v.end(), [&](double a) {
+        if(a > max)
+            max = a;
+        sleepFor(sleepValueMinMax);
+        if(a < min)
+            min = a;
+        sleepFor(sleepValueMinMax);
+    });
     return std::make_pair(min, max);
 }
 
@@ -37,7 +45,7 @@ void averageThread(const std::vector<double>& v, double& averageVal){
     std::cout << "average value = " << averageVal << '\n';
 }
 
-void initialize(std::vector<double>& v){
+void initializeStartVector(std::vector<double>& v){
     std::cout << "enter array size and elements\n";
     size_t size;
     std::cin >> size;
@@ -53,10 +61,9 @@ void initialize(std::vector<double>& v){
     v.shrink_to_fit();
 }
 
-void print(const std::vector<double>& v){
+void printVector(const std::vector<double>& v){
     std::cout << "result vector : \n";
-    for(auto& i : v)
-        std::cout << i << " ";
+    std::for_each(v.begin(), v.end(), [](double a) {std::cout << a << " ";});
 }
 
 void replaceMinMaxValues(std::vector<double>& v, const std::pair<int,int>& minMax, double average){
@@ -65,25 +72,33 @@ void replaceMinMaxValues(std::vector<double>& v, const std::pair<int,int>& minMa
             i = average;
 }
 
-int main() {
-    std::vector<double> v;
-    try{
-        initialize(v);
-    }
-    catch(std::length_error&){
-        std::cerr << "ERROR : size must be a positive number\n";
-        return -1;
-    }
-    catch(std::bad_alloc&){
-        std::cerr << "ERROR : cannot allocate too much memory\n";
-    }
-    std::pair <int, int> minMaxVal;
-    double averageVal;
+void createAndJoinThreads(const std::vector<double>& v, double& averageVal,
+                          std::pair<int, int>& minMaxVal){
     auto minMax = std::thread(minMaxThread, std::cref(v), std::ref(minMaxVal));
     minMax.join();
     auto average = std::thread(averageThread, std::cref(v), std::ref(averageVal));
     average.join();
+}
+
+int main() {
+    std::vector<double> v;
+    try{
+        initializeStartVector(v);
+    }
+    catch(std::length_error&){
+        std::cerr << "ERROR : size must be a positive number\n";
+        v.clear();
+        return -1;
+    }
+    catch(std::bad_alloc&){
+        std::cerr << "ERROR : can not allocate too much memory";
+        v.clear();
+        return -1;
+    }
+    std::pair<int, int> minMaxVal;
+    double averageVal;
+    createAndJoinThreads(v, averageVal, minMaxVal);
     replaceMinMaxValues(v, minMaxVal, averageVal);
-    print(v);
+    printVector(v);
     return 0;
 }
