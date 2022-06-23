@@ -12,9 +12,11 @@ bool stopWorking(const markerParams& params){
 
 DWORD WINAPI marker(void* paramsSettings){
     markerParams params = *static_cast<markerParams*>(paramsSettings);
+    srand(params.getId());
     EnterCriticalSection(&markersVectorAccessCritSection);
     while(true) {
-        if(!params.setMarkedElenets())
+        int randomNum = rand();
+        if(!params.setMarkersElements(randomNum))
         {
             params.printInfo();
             LeaveCriticalSection(&markersVectorAccessCritSection);

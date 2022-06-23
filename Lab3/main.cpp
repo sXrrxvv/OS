@@ -1,12 +1,4 @@
 #include "marker.h"
-#include "markerParams.h"
-
-CRITICAL_SECTION markersVectorAccessCritSection;
-std::vector<HANDLE> markedEventsHandlers;
-std::vector<HANDLE> closeThreadEventsHandlers;
-std::vector<HANDLE> removedMarkedEventsHandlers;
-std::vector<HANDLE> threadsHandles;
-HANDLE continueEventHandler;
 
 std::vector<HANDLE> startThreads(int count){
     threadsHandles = std::vector<HANDLE>(count);
@@ -32,7 +24,7 @@ std::vector<HANDLE> startThreads(int count){
 }
 
 std::vector<HANDLE> CreateEvents(int count ,bool manualReset, bool initialState){
-    std::vector<HANDLE> events = new std::vector<HANDLE>(count);
+    std::vector<HANDLE> events = std::vector<HANDLE>(count);
     for (int i = 0; i < count; i++){
         events[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
         if(NULL == events[i]){
@@ -42,13 +34,8 @@ std::vector<HANDLE> CreateEvents(int count ,bool manualReset, bool initialState)
     return events;
 }
 
-void initializeHandles(uInt markerCount){
+void initializeHandles(int markerCount){
     InitializeCriticalSection(&markersVectorAccessCritSection);
-    if(NULL == markersVectorAccessCritSection){
-        std::cerr << "ERROR: can't create crit section\n";
-        DeleteCriticalSection(markersVectorAccessCritSection);
-        throw ;
-    }
     try {
         markedEventsHandlers = CreateEvents(markerCount, FALSE, FALSE);
     }
@@ -72,12 +59,12 @@ void initializeHandles(uInt markerCount){
 
 }
 
-void closeAll(uInt markersCount){
-    DeleteCriticalSection(markersVectorAccessCritSection);
+void closeAll(int markersCount){
+    DeleteCriticalSection(&markersVectorAccessCritSection);
     CloseHandle(continueEventHandler);
     for(int i = 0; i < markersCount; ++i){
         CloseHandle(closeThreadEventsHandlers[i]);
-        CloseHandle(markedEventsHandlers);
+        CloseHandle(markedEventsHandlers[i]);
         CloseHandle(removedMarkedEventsHandlers[i]);
     }
 }
@@ -88,15 +75,15 @@ void SetRemovedEvents(const std::vector<HANDLE>& removedEvents){
     }
 }
 
-void manageMarkers(uInt markerCount){
+void manageMarkers(int markerCount){
     threadsHandles = startThreads(markerCount);
-    uInt activeMarkers = markerCount;
+    int activeMarkers = markerCount;
     while (activeMarkers != 0){
         SetRemovedEvents(removedMarkedEventsHandlers);
-        WaitForMultipleObjects(markerCount, markedEventsHandlers, TRUE, INFINITE);
+        WaitForMultipleObjects(markerCount, markedEventsHandlers.data(), TRUE, INFINITE);
         markerParams::printVector();
         std::cout << "Enter # of marker to be closed: \n";
-        uInt num;
+        int num;
         std::cin >> num;
         if(num > markerCount){
             std::cout << "wrong index\n";
@@ -122,7 +109,7 @@ int main() {
         return -1;
     }
     std::cout << "Enter markers count: ";
-    uInt markerCount;
+    int markerCount;
     std::cin >> markerCount;
     try {
         initializeHandles(markerCount);

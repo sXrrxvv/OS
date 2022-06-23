@@ -1,122 +1,81 @@
-#include <windows.h>
-#include <vector>
-#include <climits>
-#include <iostream>
+#include "defs.h"
 
-typedef unsigned int uInt;
+static std::vector<int> sharedVector;
+static int pCounter = 0;
 
 struct markerParams{
 private:
-    static std::vector<uInt>* pSharedVector;
-    const uInt markerId;
-    uInt markedCount;
-    uInt cantMark;
-    static uInt ptrCounter;
+    const std::vector<int>* pSharedVector;
+    const unsigned int markerId;
+    unsigned int markedCount;
+    unsigned int cantMark;
+    int* ptrCounter;
 
 public:
-    static void initializeStartVector();
+    explicit markerParams(int id) : markerId(id), pSharedVector(&sharedVector), markedCount(0), cantMark(INT_MAX), ptrCounter(&pCounter) {
+        ++(*ptrCounter);
+    };
 
-    ~markerParams();
+    ~markerParams() {
+        if(*ptrCounter)
+            --(*ptrCounter);
+        else {
+            delete pSharedVector;
+            delete ptrCounter;
+        }
+    }
 
-    explicit markerParams(uInt id);
+    static void initializeStartVector(){
+        std::cout << "Enter array size: ";
+        int arrSize;
+        std::cin >> arrSize;
+        if(arrSize <= 0)
+            throw std::length_error("non positive value");
+        sharedVector = std::vector<int>(arrSize);
+    }
 
-    uInt getId () const;
+    unsigned int getId () const {return markerId;}
 
-    uInt getMarkedCount() const;
+    unsigned int getMarkedCount() const {return markedCount;}
 
-    void increaseMarkedCount();
+    void increaseMarkedCount() {++markedCount;}
 
-    static size_t getVectorSize() ;
+    size_t getVectorSize() const {return pSharedVector->size();}
 
-    void setUnmarked(uInt ind);
+    void setUnmarked(const unsigned int ind) {cantMark = ind;}
 
-    uInt getUnmarked() const;
+    unsigned int getUnmarked() const {return cantMark;}
 
-    void printInfo() const;
+    bool setMarkersElements(int randomNum){
 
-    void deleteMarkedElements();
+        randomNum %= sharedVector.size();
+        if(sharedVector[randomNum] == 0){
+            Sleep(5);
+            sharedVector[randomNum] = markerId;
+            Sleep(5);
+            ++markedCount;
+            return true;
+        }
+        cantMark = randomNum;
+        return false;
+    }
 
-    static void printVector();
+    void printInfo() const{
+        std::cout <<"Marker number: " << this->getId() << '\t' << "Marked elements: " << this->getMarkedCount() <<
+                  "\t" << "Can't mark: " << this->getUnmarked() <<'\n';
+    }
 
-    bool setMarkersElements();
+    void deleteMarkedElements(){
+        for(size_t i = 0; i < pSharedVector->size(); ++i){
+            if(sharedVector[i] == markerId)
+                sharedVector[i] = 0;
+        }
+    }
+
+    static void printVector() {
+        for(size_t i = 0; i < sharedVector.size(); ++i){
+            std::cout << sharedVector[i] << " ";
+        }
+        std::cout << '\n';
+    }
 };
-
-bool markerParams::setMarkersElements(){
-    srand(markerId);
-    uInt randomNum = rand();
-    randomNum %= pSharedVector->size();
-    if((*pSharedVector)[randomNum] == 0){
-        Sleep(5);
-        (*pSharedVector)[randomNum] = markerId;
-        Sleep(5);
-        ++markedCount;
-        return true;
-    }
-    cantMark = randomNum;
-    return false;
-}
-
-markerParams::~markerParams() {
-    if(ptrCounter)
-        --ptrCounter;
-    else
-        delete pSharedVector;
-}
-
-void markerParams::initializeStartVector() {
-    if(!ptrCounter)
-        return;
-    std::cout << "Enter array size: ";
-    int arrSize;
-    std::cin >> arrSize;
-    if(arrSize <= 0)
-        throw std::length_error("non positive value");
-    pSharedVector = new std::vector<uInt>(arrSize);
-}
-
-markerParams::markerParams(uInt id) : markerId(id), markedCount(0), cantMark(INT_MAX){
-    ++ptrCounter;
-}
-
-uInt markerParams::getId() const {
-    return markerId;
-}
-
-uInt markerParams::getMarkedCount() const {
-    return markedCount;
-}
-
-void markerParams::increaseMarkedCount() {
-    ++markedCount;
-}
-
-size_t markerParams::getVectorSize() {
-    return pSharedVector->size();
-}
-
-void markerParams::setUnmarked(uInt ind){
-    cantMark = ind;
-}
-
-uInt markerParams::getUnmarked() const {
-    return cantMark;
-}
-
-void markerParams::printInfo() const{
-    std::cout <<"Marker number: " << this->getId() << '\t' << "Marked elements: " << this->getMarkedCount() <<
-              "\t" << "Can't mark: " << this->getUnmarked() <<'\n';
-}
-
-void markerParams::deleteMarkedElements(){
-    for(size_t i = 0; i < pSharedVector->size(); ++i){
-        if(((*pSharedVector)[i]) == markerId)
-            (*pSharedVector)[i] = 0;
-    }
-}
-
-void markerParams::printVector() {
-    for(size_t i = 0; i < pSharedVector->size(); ++i){
-        std::cout << (*pSharedVector)[i] << " ";
-    }
-    std::cout << '\n';
-}
