@@ -6,6 +6,7 @@ enum optionType{
     writeMessage
 };
 
+const int msgMaxCapacity = 20;
 const std::string senderExe = "Sender.exe";
 const std::string fileMutexName = "mutex";
 const std::string readSemName = "readS";
