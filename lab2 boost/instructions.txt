@@ -1,0 +1,1 @@
+in case of linux compile with -pthread -lboost_thread -lboost_chrono flags
