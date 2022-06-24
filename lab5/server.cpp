@@ -1,42 +1,64 @@
 #include <iostream>
-#include "windows.h"
-#include "defs.h"
-#include "employee.h"
-#include <vector>
 #include <fstream>
+#include <string>
+#include <sstream>
+#include <vector>
+#include "employee.h"
+#include "windows.h"
 
-CRITICAL_SECTION csFileWrite;
-CRITICAL_SECTION csBlockedFlags;
-HANDLE startAllEventHandle;
-std::vector<HANDLE> readyEventsHandles;
-std::vector<HANDLE> serverThreadsHandles;
-std::vector<EntryState> entryStates;
-int empCount;
+int employeesCount;
+int clientsCount;
+std::string binaryFileName;
 
-int findEmployeeInFile(int num){
-    std::fstream fs(fileName.c_str(), std::ios::binary | std::ios::in);
-    for(int i = 0 ; i < empCount; ++i){
+CRITICAL_SECTION fileWriteCritSection;
+CRITICAL_SECTION blockedFlagsCritSection;
+
+HANDLE startAllEventHandler;
+
+std::vector<HANDLE> readyEventHandlers;
+std::vector<HANDLE> serverThreadsHandlers;
+std::vector<EntryState> entryStatesHandlers;
+
+void prepareBinaryFile(){
+    std::fstream fout(binaryFileName.c_str(), std::ios::binary | std::ios::out);
+    for (int i = 0; i < employeesCount; ++i){
         employee emp;
-        fs >> emp;
-        if(emp.getNum() == num)
-            return i;
+        std::cout << "enter employee id, name and working hours\n";
+        std::cin >> emp;
+        fout << emp;
     }
-    return -1;
 }
 
-bool createClient(int clientID)
-{
+void printBinaryFile(){
+    employee emp;
+    std::fstream fs(binaryFileName.c_str(), std::ios::binary | std::ios::in);
+    for (int i = 0; i < employeesCount; ++i){
+        fs >> emp;
+        std::cout << emp << '\n';
+    }
+}
+
+int findEmployeeInFile(int id){
+    std::fstream fs(binaryFileName.c_str(), std::ios::binary | std::ios::in);
+    employee emp;
+    for (int i = 0; i < employeesCount; ++i){
+        fs >> emp;
+        if (emp.getId() == id){
+            return i;
+        }
+    }
+    return notExistIndex;
+}
+
+bool createClient(int clientID){
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
-
     ZeroMemory( &si, sizeof(si) );
     si.cb = sizeof(si);
     ZeroMemory( &pi, sizeof(pi) );
-
     std::ostringstream args;
     args << clientID;
-
-    bool createOk = CreateProcess( clientExeName.c_str(),
+    if(!CreateProcess( clientExeName.c_str(),
                                    &args.str()[0],
                                    NULL,
                                    NULL,
@@ -46,46 +68,54 @@ bool createClient(int clientID)
                                    NULL,
                                    &si,
                                    &pi
-    );
-    if (!createOk)
-    {
-      std::cerr << ("CreateProcess failed!");
+    )){
+        std::cerr << "CreateProcess failed!";
+        return false;
     }
-
     CloseHandle(pi.hThread);
-    return createOk;
+    return true;
 }
 
-void createBinary(){
-    std::fstream fout(fileName.c_str(), std::ios::binary | std::ios::out);
-    std::cout << "enter employee count\n";
-    std::cin >> empCount;
-    for(int i = 0; i < empCount; ++i){
-        std::cout << "enter employee id, name and working hours\n";
-        employee emp;
-        std::cin >> emp;
-        fout << emp;
+bool prepareSyncObjects(){
+    InitializeCriticalSection(&blockedFlagsCritSection);
+    InitializeCriticalSection(&fileWriteCritSection);
+    startAllEventHandler = CreateEvent(NULL, TRUE, FALSE, startAllEventName.c_str());
+    entryStatesHandlers = std::vector<EntryState>(clientsCount);
+    if (startAllEventHandler == NULL){
+        std::cerr << "ERROR: can't create event";
+        return false;
     }
+    return true;
 }
 
+bool createHandles(){
+    bool syncObjPrepared = prepareSyncObjects();
+    bool clientsPrepared = true;
+    readyEventHandlers = std::vector<HANDLE>(clientsCount);
+    std::ostringstream handleName;
+    for (int i = 0; i < clientsCount; ++i){
+        handleName  << i;
+        readyEventHandlers[i] = CreateEvent(NULL, TRUE, FALSE, &handleName.str()[0]);
+        clientsPrepared &= createClient(i);
+        handleName.str("");
+        handleName.clear();
+    }
+    return syncObjPrepared && clientsPrepared;
+}
 
-void printBinaryFile()
+void cleanAll(){
+    for (int i = 0; i < clientsCount; ++i){
+        CloseHandle(readyEventHandlers[i]);
+    }
+    CloseHandle(startAllEventHandler);
+    DeleteCriticalSection(&fileWriteCritSection);
+    DeleteCriticalSection(&blockedFlagsCritSection);
+}
+
+DWORD WINAPI processingThread(LPVOID params)
 {
-    employee emp;
-    std::fstream fs(fileName.c_str(), std::ios::binary | std::ios::in);
-    for (int i = 0; i < empCount; ++i)
-    {
-        fs >> emp;
-        std::cout << emp << '\n';
-    }
-}
-
-
-DWORD WINAPI startMessageConnection(LPVOID params){
-    HANDLE hPipe = params;
-    bool readSuccess = false;
-    bool sendSuccess = false;
-    char message[msgMaxCapacity];
+    HANDLE pipeHandler = params;
+    char message[MESSAGE_MAX_SIZE];
     int id;
     employee emp;
     while (true)
@@ -93,41 +123,36 @@ DWORD WINAPI startMessageConnection(LPVOID params){
         DWORD cbRead;
         DWORD cbWritten;
         bool allowModify = false;
-
-        readSuccess = ReadFile(hPipe, message, msgMaxCapacity, &cbRead, NULL);
-        if (!readSuccess)
-        {
-            std::cerr << ("Failed to read the message!");
+        if(!ReadFile(pipeHandler, message, MESSAGE_MAX_SIZE, &cbRead, NULL)){
+            std::cerr << "ERROR: can't read message";
             break;
         }
-
-        id = std::atoi(message + 2);
-        EnterCriticalSection(&csFileWrite);
+        id = std::atoi(message + offset);
+        EnterCriticalSection(&fileWriteCritSection);
         int posInFile = findEmployeeInFile(id);
-        if (posInFile != -1)
-        {
-            std::fstream fs(fileName.c_str(), std::ios::binary | std::ios::in);
+        if (posInFile != notExistIndex){
+            std::fstream fs(binaryFileName.c_str(), std::ios::binary | std::ios::in);
             fs.seekg(posInFile * sizeof(employee));
             fs >> emp;
         }
-        else emp.setNum(-1);
-        LeaveCriticalSection(&csFileWrite);
-        EnterCriticalSection(&csBlockedFlags);
+        else emp.setId(notExistIndex);
+        LeaveCriticalSection(&fileWriteCritSection);
+        EnterCriticalSection(&blockedFlagsCritSection);
         switch (message[0])
         {
             case 'r':
             {
-                if (posInFile != -1) entryStates[posInFile] = IS_BEING_READ;
+                if (posInFile != -1) entryStatesHandlers[posInFile] = IS_BEING_READ;
                 break;
             }
             case 'w':
             {
                 if(posInFile != -1)
                 {
-                    if (entryStates[posInFile] == IS_BEING_READ) emp.clear();
+                    if (entryStatesHandlers[posInFile] == IS_BEING_READ) emp.clear();
                     else
                     {
-                        entryStates[posInFile] = IS_BEING_MODIFIED;
+                        entryStatesHandlers[posInFile] = IS_BEING_MODIFIED;
                         allowModify = true;
                     }
                 }
@@ -135,51 +160,54 @@ DWORD WINAPI startMessageConnection(LPVOID params){
             }
             case 'c':
             {
-                if (posInFile != -1) entryStates[posInFile] = IS_FREE;
+                if (posInFile != -1) entryStatesHandlers[posInFile] = IS_FREE;
                 break;
             }
         }
-        LeaveCriticalSection(&csBlockedFlags);
+        LeaveCriticalSection(&blockedFlagsCritSection);
         if (message[0] == 'c') continue;
-        sendSuccess = WriteFile(hPipe, &emp, sizeof(employee), &cbWritten, NULL);
-        if (!sendSuccess)
-        {
-            std::cerr << ("Failed to send the message!");
+         if(!WriteFile(pipeHandler, &emp, sizeof(employee),
+                       &cbWritten, NULL)){
+            std::cerr << "ERROR: can't write message";
             break;
         }
 
         if (message[0] == 'w' && allowModify)
         {
-            readSuccess = ReadFile(hPipe, &emp, sizeof(employee), &cbRead, NULL);
-            if (!readSuccess)
-                {
-                    break;
+            if(!ReadFile(pipeHandler, &emp, sizeof(employee), &cbRead, NULL));
+                std::cerr << "ERROR: can't read client answer";
+                break;
             }
-            if (posInFile != - 1)
-            {
-                EnterCriticalSection(&csFileWrite);
-                std::fstream fs(fileName.c_str(), std::ios::binary | std::ios::out);
+                EnterCriticalSection(&fileWriteCritSection);
+                std::fstream fs(binaryFileName.c_str(), std::ios::binary | std::ios::out);
                 fs.seekp(posInFile * sizeof(employee));
                 fs << emp;
                 fs.close();
-                LeaveCriticalSection(&csFileWrite);
-                EnterCriticalSection(&csBlockedFlags);
-                entryStates[posInFile] = IS_FREE;
-                LeaveCriticalSection(&csBlockedFlags);
-            }
+                LeaveCriticalSection(&fileWriteCritSection);
+                EnterCriticalSection(&blockedFlagsCritSection);
+                entryStatesHandlers[posInFile] = IS_FREE;
+                LeaveCriticalSection(&blockedFlagsCritSection);
         }
-    }
-    FlushFileBuffers(hPipe);
-    DisconnectNamedPipe(hPipe);
-    CloseHandle(hPipe);
+    FlushFileBuffers(pipeHandler);
+    DisconnectNamedPipe(pipeHandler);
+    CloseHandle(pipeHandler);
 }
 
-bool createPipes(int clientsCount) {
-    serverThreadsHandles = std::vector<HANDLE>(clientsCount);
-    HANDLE hPipe;
-    for (int i = 0; i < clientsCount; ++i)
-    {
-        hPipe = CreateNamedPipe(
+void initialize(){
+
+    std::cout << "Enter the number of employees : ";
+    std::cin >> employeesCount;
+    std::cout << "Enter the number of clients : ";
+    std::cin >> clientsCount;
+    std::cout << "Enter binary file's name : ";
+    std::cin >> binaryFileName;
+}
+
+bool makeConnection(){
+    serverThreadsHandlers = std::vector<HANDLE>(clientsCount);
+    HANDLE pipeHandler;
+    for (int i = 0; i < clientsCount; ++i){
+        pipeHandler = CreateNamedPipe(
                 pipeName.c_str(),
                 PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_MESSAGE |
@@ -191,63 +219,45 @@ bool createPipes(int clientsCount) {
                 0,
                 NULL);
 
-        if (hPipe == INVALID_HANDLE_VALUE)
-        {
-            std::cerr << ("CreateNamedPipe failed!");
+        if (pipeHandler == INVALID_HANDLE_VALUE){
+            std::cerr << "ERROR: can't create pipe";
             return false;
         }
-
-        bool isConnected = ConnectNamedPipe(hPipe, NULL) != 0 || (GetLastError() == ERROR_PIPE_CONNECTED);
-        if (isConnected)
-        {
-            serverThreadsHandles[i] = CreateThread(NULL, 0, startMessageConnection, (LPVOID) hPipe, 0, NULL);
-            if (serverThreadsHandles[i] == NULL)
-            {
-                std::cerr << ("CreateThread for server failed!");
+        bool isConnected = ConnectNamedPipe(pipeHandler, NULL) != 0
+                || (GetLastError() == ERROR_PIPE_CONNECTED);
+        if (isConnected){
+            serverThreadsHandlers[i] = CreateThread(NULL, 0, processingThread,
+                                             (LPVOID) pipeHandler, 0, NULL);
+            if (serverThreadsHandlers[i] == NULL){
+                std::cerr << "ERROR:: can't connect to pipe";
                 return false;
             }
         }
-        else
-        {
-            CloseHandle(hPipe);
+        else{
+            CloseHandle(pipeHandler);
         }
     }
     return true;
 }
 
-bool initializeHandles(int clientsCount){
-    InitializeCriticalSection(&csBlockedFlags);
-    InitializeCriticalSection(&csFileWrite);
-    startAllEventHandle = CreateEvent(NULL, TRUE, FALSE, startAllEventName.c_str());
-    entryStates = std::vector<EntryState>(clientsCount);
-    if (startAllEventHandle == NULL)
-    {
-        std::cerr << ("CreateEvent failed!");
-        return false;
+int main()
+{
+    initialize();
+    prepareBinaryFile();
+    if(!createHandles()){
+        std::cerr << "Something went wrong while preparing Win32 stuff!";
+        return -1;
     }
-    readyEventsHandles = std::vector<HANDLE>(clientsCount);
-        for (int i = 0; i < clientsCount; ++i) {
-            readyEventsHandles[i] = CreateEvent(NULL, TRUE, FALSE, &readyEventName.str()[0] + i);
-            createClient(i);
-            if (readyEventsHandles[i] == NULL) {
-                std::cerr << "create event failure";
-                return false;
-            }
-        }
-    return true;
-}
-
-
-int main() {
-    createBinary();
-    std::cout << "enter clients count\n";
-    int clientsCount;
-    std::cin >> clientsCount;
-    initializeHandles(clientsCount);
-    WaitForMultipleObjects(clientsCount, readyEventsHandles.data(), TRUE, INFINITE);
-    SetEvent(startAllEventHandle);
-    createPipes(clientsCount);
-    WaitForMultipleObjects(clientsCount, serverThreadsHandles.data(), TRUE, INFINITE);
+    WaitForMultipleObjects(clientsCount, readyEventHandlers.data(), TRUE, INFINITE);
+    SetEvent(startAllEventHandler);
+    if(!makeConnection()){
+        std::cerr << "Something went wrong while establishing server-client connections!\n";
+        return -1;
+    }
+    WaitForMultipleObjects(clientsCount, serverThreadsHandlers.data(), TRUE, INFINITE);
+    std::cout << "Final file : \n";
     printBinaryFile();
+    cleanAll();
+    std::cout << "Bye!\n";
     return 0;
 }

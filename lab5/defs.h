@@ -1,13 +1,4 @@
 #include <string>
-#include <sstream>
-
-typedef unsigned int uInt;
-enum optionType{
-    modification,
-    read,
-    unused,
-    stop
-};
 
 enum EntryState {
     IS_FREE,
@@ -15,9 +6,10 @@ enum EntryState {
     IS_BEING_MODIFIED
 };
 
-const int msgMaxCapacity = 20;
+const int offset = 2;
+const int notExistIndex = -1;
+const int MESSAGE_MAX_SIZE = 16;
+const int maxNameLenght = 10;
+const std::string pipeName = "\\\\.\\pipe\\lab5";
 const std::string clientExeName = "client.exe";
-const std::string pipeName = "\\\\.\\pipe\\pipeName";
-const std::ostringstream readyEventName("revent");
-const std::string startAllEventName("event");
-const std::string fileName = "file.bin";
+const std::string startAllEventName ="startAll";
